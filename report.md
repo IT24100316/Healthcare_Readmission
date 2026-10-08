@@ -38,6 +38,7 @@
 | Missing % Bar Chart | `weight` is 97% missing; `medical_specialty` ~49%. | Will drop `weight`. Will impute `medical_specialty` with "Unknown". |
 | Readmission by `discharge_disposition` | Certain codes (hospice/expired) mean readmission is impossible. | Will drop rows with terminal discharge codes to prevent target leakage. |
 | Correlation Heatmap | No severe multicollinearity amongst numeric features. | Will retain all numeric features for tree-based models. |
+| Outlier Boxplots | Many numerical features (e.g., number_inpatient) have severe right-tail outliers. | Used the IQR method to count them dynamically. Will consider Winsorization or robust algorithms. |
 
 ---
 
@@ -48,6 +49,7 @@
 | Placeholders like '?' used instead of NaN | Pandas cannot automatically detect missing data. | Replace '?', 'Unknown/Invalid', etc., with `np.nan`. |
 | Terminal discharge codes (Death/Hospice) | Patients conceptually cannot be readmitted, artificially inflates negative class. | Remove all rows with these discharge codes. |
 | Same patient appears in many rows | Random train/test split will cause data leakage. | Group split by `patient_nbr` / remove subsequent visits. |
+| Coded IDs stored as integers | Masked hidden nulls (e.g., "NULL", "Not Mapped") from pandas missing value checkers. | Dynamically parsed `IDS_mapping.csv` to map IDs and properly flag hidden nulls as NaNs. |
 
 ---
 

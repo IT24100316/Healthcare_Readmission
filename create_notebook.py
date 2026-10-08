@@ -225,6 +225,45 @@ for j in range(i + 1, len(axes)):
 plt.tight_layout()
 plt.savefig('plots/EDA/univariate_numerical.png', bbox_inches='tight')
 plt.show()
+
+# Stats
+stats_df = df[numeric_cols].describe().T
+stats_df['skewness'] = df[numeric_cols].skew()
+
+# IQR Outlier Detection
+outliers_list = []
+for col in numeric_cols:
+    Q1 = df[col].quantile(0.25)
+    Q3 = df[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower = Q1 - 1.5 * IQR
+    upper = Q3 + 1.5 * IQR
+    outliers_count = ((df[col] < lower) | (df[col] > upper)).sum()
+    outliers_list.append(outliers_count)
+    
+stats_df['outliers (IQR)'] = outliers_list
+print("\\nNumerical Statistics & Outliers:")
+print(stats_df)
+"""))
+
+cells.append(create_markdown_cell("""### Outlier Visualization (Boxplots)
+To visually inspect the outliers detected by the IQR method above, we plot boxplots for all numerical features."""))
+
+cells.append(create_code_cell("""# Boxplots for numerical outliers
+fig, axes = plt.subplots(rows, 3, figsize=(18, rows * 4))
+axes = axes.flatten()
+
+for i, col in enumerate(numeric_cols):
+    sns.boxplot(x=df[col], ax=axes[i], color='coral')
+    axes[i].set_title(f'Outliers: {col}')
+
+# Hide any empty subplots
+for j in range(i + 1, len(axes)):
+    fig.delaxes(axes[j])
+
+plt.tight_layout()
+plt.savefig('plots/EDA/outliers_boxplots.png', bbox_inches='tight')
+plt.show()
 """))
 
 cells.append(create_code_cell("""# Plot ALL Categorical features
