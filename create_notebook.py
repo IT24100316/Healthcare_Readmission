@@ -428,8 +428,53 @@ cells.append(create_markdown_cell("""### What we learned
 - We will **drop** all rows with these discharge disposition codes during preprocessing to ensure the model focuses on patients who actually *could* be readmitted.
 """))
 
-# 9. Conclusions
-cells.append(create_markdown_cell("""## 9. EDA Conclusions & Next Steps
+# 9. Targeted EDA (Before Preprocessing)
+cells.append(create_markdown_cell("""## 9. Targeted EDA (Before Preprocessing)
+We need to explicitly analyze the ID mappings and the internal distributions of test results and medications before we can safely finalize Phase 4 and Phase 5."""))
+
+cells.append(create_code_cell("""# A. ID Codes Distributions
+id_cols_to_check = ['admission_type_id', 'discharge_disposition_id', 'admission_source_id']
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+for i, col in enumerate(id_cols_to_check):
+    counts = df[col].value_counts().nlargest(10)
+    sns.barplot(x=counts.index, y=counts.values, ax=axes[i], order=counts.index, palette='magma')
+    for c in axes[i].containers: axes[i].bar_label(c, fmt='%.0f', fontsize=9)
+    axes[i].set_title(f'Top 10: {col}')
+    
+plt.tight_layout()
+plt.savefig('plots/EDA/id_mappings_targeted.png', bbox_inches='tight')
+plt.show()
+"""))
+
+cells.append(create_code_cell("""# B. Test Results & Medications Ordinality Check
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Plot A1Cresult vs Readmission
+plot_readmission_distribution('A1Cresult', axes[0])
+axes[0].set_title("A1Cresult vs Target")
+
+# Plot Insulin (since it's the most common) vs Readmission
+plot_readmission_distribution('insulin', axes[1])
+axes[1].set_title("Insulin vs Target")
+
+plt.tight_layout()
+plt.savefig('plots/EDA/meds_tests_targeted.png', bbox_inches='tight')
+plt.show()
+"""))
+
+cells.append(create_markdown_cell("""### What we learned from Targeted EDA
+- For `A1Cresult`, the proportion of early readmissions (`<30`) does **not** strictly increase from `Norm` -> `>7` -> `>8`. This means it is NOT strictly ordinal in relation to our target.
+- For `insulin`, the `Up` and `Down` categories exhibit different risk profiles compared to `Steady`.
+- ID columns are heavily concentrated in just 2-4 categories (e.g., ID 1, 2, 3), meaning we can safely group the long tail into "Other".
+
+### What we will do about it
+- We will group the ID columns based on their Top 3 mapped categories and map the rest to "Other" in Phase 4.
+- We will use **One-Hot Encoding** (Nominal) for `A1Cresult` and medications in Phase 5 rather than Ordinal Encoding, as it prevents forcing false linear assumptions on non-linear risks.
+"""))
+
+# 10. Conclusions
+cells.append(create_markdown_cell("""## 10. EDA Conclusions & Next Steps
 We have a clear path forward for the Preprocessing phase.
 
 | Finding | Implication | Action |
@@ -440,6 +485,7 @@ We have a clear path forward for the Preprocessing phase.
 | High encounters per patient | Random split causes leakage | GroupKFold / Split by `patient_nbr` |
 | Hospice/Death discharge codes | Inflates negative classes | Drop rows with terminal codes |
 | Diagnosis codes have 700+ unique values | High dimensionality | Group ICD-9 codes by category |
+| Tests/Meds lack strict monotonic correlation | Ordinal encoding creates false math | Use One-Hot Encoding |
 """))
 
 # --- PREPROCESSING START ---
@@ -539,8 +585,18 @@ cells.append(create_code_cell("""# Save missing counts before Phase 3
 missing_before = train_df.isnull().sum()
 missing_before = missing_before[missing_before > 0]
 
-# 1. Impute informative missing values
-informative_cols = ['medical_specialty', 'payer_code', 'race']
+# 1. Map ID hidden nulls to NaN
+null_ids = {
+    'admission_type_id': [5, 6, 8],
+    'discharge_disposition_id': [18, 25, 26],
+    'admission_source_id': [9, 15, 17, 20, 21]
+}
+for col, ids in null_ids.items():
+    train_df[col] = train_df[col].replace(ids, np.nan)
+    test_df[col] = test_df[col].replace(ids, np.nan)
+
+# 2. Impute informative missing values
+informative_cols = ['medical_specialty', 'payer_code', 'race', 'admission_type_id', 'discharge_disposition_id', 'admission_source_id']
 for col in informative_cols:
     train_df[col] = train_df[col].fillna('Unknown')
     test_df[col] = test_df[col].fillna('Unknown')
@@ -605,9 +661,50 @@ def map_diagnosis(code):
     except:
         return 'Other'
 
+def map_diagnosis_granular(code):
+    if code == '?' or pd.isna(code): return 'Other'
+    code_str = str(code)
+    if code_str.startswith('V') or code_str.startswith('E'): return 'External/Supplemental'
+    try:
+        c = float(code)
+        # Specific high-risk conditions
+        if c == 250: return 'Diabetes'
+        if 401 <= c <= 405: return 'Hypertension'
+        if c == 428: return 'Heart Failure'
+        if 410 <= c <= 414: return 'Ischemic Heart Disease'
+        if 430 <= c <= 438: return 'Cerebrovascular Disease'
+        if 490 <= c <= 496: return 'COPD/Asthma'
+        if 480 <= c <= 488: return 'Pneumonia'
+        if 580 <= c <= 589: return 'Kidney Disease'
+        
+        # Broad categories
+        if 1 <= c <= 139: return 'Infectious'
+        if 140 <= c <= 239: return 'Neoplasms'
+        if 240 <= c <= 279: return 'Endocrine/Metabolic'
+        if 280 <= c <= 289: return 'Blood'
+        if 290 <= c <= 319: return 'Mental'
+        if 320 <= c <= 389: return 'Nervous'
+        if 390 <= c <= 459 or c == 785: return 'Circulatory_Other'
+        if 460 <= c <= 519 or c == 786: return 'Respiratory_Other'
+        if 520 <= c <= 579 or c == 787: return 'Digestive'
+        if 580 <= c <= 629 or c == 788: return 'Genitourinary_Other'
+        if 630 <= c <= 679: return 'Pregnancy'
+        if 680 <= c <= 709: return 'Skin'
+        if 710 <= c <= 739: return 'Musculoskeletal'
+        if 740 <= c <= 759: return 'Congenital'
+        if 760 <= c <= 779: return 'Perinatal'
+        if 780 <= c <= 799: return 'Symptoms/Ill-defined'
+        if 800 <= c <= 999: return 'Injury/Poisoning'
+        return 'Other'
+    except:
+        return 'Other'
+
 for col in ['diag_1', 'diag_2', 'diag_3']:
     train_df[col] = train_df[col].apply(map_diagnosis)
     test_df[col] = test_df[col].apply(map_diagnosis)
+    
+    train_df[col + '_granular'] = train_df[col].apply(map_diagnosis_granular)
+    test_df[col + '_granular'] = test_df[col].apply(map_diagnosis_granular)
 
 # Age mapping
 age_map = {'[0-10)':0, '[10-20)':1, '[20-30)':2, '[30-40)':3, '[40-50)':4, '[50-60)':5, '[60-70)':6, '[70-80)':7, '[80-90)':8, '[90-100)':9}
@@ -624,16 +721,40 @@ top_payers = train_df['payer_code'].value_counts().nlargest(10).index
 train_df['payer_code'] = train_df['payer_code'].apply(lambda x: x if x in top_payers else 'Other')
 test_df['payer_code'] = test_df['payer_code'].apply(lambda x: x if x in top_payers else 'Other')
 
-# Binning skewed counts
-def bin_counts(x):
-    if x == 0: return '0'
-    elif x == 1: return '1'
-    elif x == 2: return '2'
-    else: return '3+'
+# Grouping ID Columns (Admission Type, Source, Discharge)
+def map_discharge(id_val):
+    if id_val == 'Unknown' or pd.isna(id_val): return 'Other'
+    id_val = int(float(id_val))
+    if id_val in [1, 8]: return 'Home'
+    if id_val in [6]: return 'Home Health'
+    if id_val in [2, 3, 4, 5, 10, 15, 16, 17, 22, 23, 24, 27, 28, 29, 30]: return 'Facility'
+    return 'Other'
 
-for col in ['number_outpatient', 'number_emergency', 'number_inpatient']:
-    train_df[col + '_binned'] = train_df[col].apply(bin_counts)
-    test_df[col + '_binned'] = test_df[col].apply(bin_counts)
+def map_adm_type(id_val):
+    if id_val == 'Unknown' or pd.isna(id_val): return 'Other'
+    id_val = int(float(id_val))
+    if id_val == 1: return 'Emergency'
+    if id_val == 3: return 'Elective'
+    return 'Other'
+
+def map_adm_source(id_val):
+    if id_val == 'Unknown' or pd.isna(id_val): return 'Other'
+    id_val = int(float(id_val))
+    if id_val == 7: return 'Emergency Room'
+    if id_val in [1, 2, 3]: return 'Referral'
+    if id_val in [4, 5, 6, 10, 18, 19, 22, 25, 26]: return 'Transfer'
+    return 'Other'
+
+train_df['discharge_disposition_id'] = train_df['discharge_disposition_id'].apply(map_discharge)
+test_df['discharge_disposition_id'] = test_df['discharge_disposition_id'].apply(map_discharge)
+
+train_df['admission_type_id'] = train_df['admission_type_id'].apply(map_adm_type)
+test_df['admission_type_id'] = test_df['admission_type_id'].apply(map_adm_type)
+
+train_df['admission_source_id'] = train_df['admission_source_id'].apply(map_adm_source)
+test_df['admission_source_id'] = test_df['admission_source_id'].apply(map_adm_source)
+
+# (We are leaving number_outpatient, number_emergency, and number_inpatient as raw numeric counts based on experimental feedback)
 
 # New Engineered Features
 train_df['total_visits'] = train_df['number_outpatient'] + train_df['number_emergency'] + train_df['number_inpatient']
@@ -641,6 +762,29 @@ test_df['total_visits'] = test_df['number_outpatient'] + test_df['number_emergen
 
 train_df['meds_per_day'] = train_df['num_medications'] / np.maximum(1, train_df['time_in_hospital'])
 test_df['meds_per_day'] = test_df['num_medications'] / np.maximum(1, test_df['time_in_hospital'])
+
+train_df['lab_tests_per_day'] = train_df['num_lab_procedures'] / np.maximum(1, train_df['time_in_hospital'])
+test_df['lab_tests_per_day'] = test_df['num_lab_procedures'] / np.maximum(1, test_df['time_in_hospital'])
+
+# Drug Summarization
+drug_cols = [c for c in train_df.columns if c in ['metformin', 'repaglinide', 'nateglinide', 'chlorpropamide', 'glimepiride', 'acetohexamide', 'glipizide', 'glyburide', 'tolbutamide', 'pioglitazone', 'rosiglitazone', 'acarbose', 'miglitol', 'troglitazone', 'tolazamide', 'insulin', 'glyburide-metformin', 'glipizide-metformin', 'glimepiride-pioglitazone', 'metformin-rosiglitazone', 'metformin-pioglitazone']]
+
+def count_drug_changes(row):
+    return sum(1 for d in drug_cols if row[d] in ['Up', 'Down'])
+
+def count_active_drugs(row):
+    return sum(1 for d in drug_cols if row[d] in ['Up', 'Down', 'Steady'])
+
+train_df['num_drug_changes'] = train_df.apply(count_drug_changes, axis=1)
+test_df['num_drug_changes'] = test_df.apply(count_drug_changes, axis=1)
+
+train_df['num_active_drugs'] = train_df.apply(count_active_drugs, axis=1)
+test_df['num_active_drugs'] = test_df.apply(count_active_drugs, axis=1)
+
+# Drop drug columns except insulin
+drugs_to_drop = [d for d in drug_cols if d != 'insulin']
+train_df = train_df.drop(columns=drugs_to_drop, errors='ignore')
+test_df = test_df.drop(columns=drugs_to_drop, errors='ignore')
 
 print("Phase 4 Feature Engineering complete!")
 print("Train set shape:", train_df.shape)
@@ -654,13 +798,115 @@ for c in axes[0].containers: axes[0].bar_label(c, fmt='%.0f', fontsize=9)
 axes[0].set_title("Grouped Diagnoses (diag_1) - Reduced from 700+ to 9")
 axes[0].tick_params(axis='x', rotation=45)
 
-sns.countplot(data=train_df, x='number_inpatient_binned', ax=axes[1], palette='crest', order=['0', '1', '2', '3+'])
-for c in axes[1].containers: axes[1].bar_label(c, fmt='%.0f', fontsize=9)
-axes[1].set_title("Binned Inpatient Visits - Handled Extreme Skew")
+# We've removed the binning plot since we are keeping them as raw counts for experimentation
+sns.histplot(data=train_df, x='number_inpatient', ax=axes[1], bins=20, color='teal')
+axes[1].set_title("Raw Inpatient Visits (Preserved for Experimentation)")
+axes[1].set_yscale('log')
 
 plt.tight_layout()
 plt.savefig('plots/Preprocessing/phase4_features.png', bbox_inches='tight')
 plt.show()
+"""))
+
+cells.append(create_markdown_cell("""## Phase 5: Prepare for Models
+Here we will encode the target variable, apply log transformations to numerical features, and use scikit-learn's `ColumnTransformer` to One-Hot Encode categorical variables and Scale numerical variables."""))
+
+cells.append(create_code_cell("""from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
+from sklearn.pipeline import Pipeline
+import numpy as np
+
+# 1. Target Encoding (NO = 0, >30 = 1, <30 = 2)
+target_mapping = {'NO': 0, '>30': 1, '<30': 2}
+y_train = train_df['readmitted'].map(target_mapping)
+y_test = test_df['readmitted'].map(target_mapping)
+
+# Drop target and patient identifiers from feature sets
+X_train = train_df.drop(columns=['readmitted', 'patient_nbr'])
+X_test = test_df.drop(columns=['readmitted', 'patient_nbr'])
+
+# Identify column types
+categorical_features = X_train.select_dtypes(include=['object', 'category']).columns.tolist()
+numerical_features = X_train.select_dtypes(exclude=['object', 'category']).columns.tolist()
+
+# 2. Build the ColumnTransformer
+# The plan specifies applying log1p to skewed counts. We'll apply it to numeric features.
+log_transformer = FunctionTransformer(np.log1p, validate=True)
+
+numeric_transformer = Pipeline(steps=[
+    ('log', log_transformer),
+    ('scaler', StandardScaler())
+])
+
+# For categorical features, we one-hot encode
+categorical_transformer = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, numerical_features),
+        ('cat', categorical_transformer, categorical_features)
+    ])
+
+# 3. Fit on Train, Transform Train and Test
+X_train_preprocessed = preprocessor.fit_transform(X_train)
+X_test_preprocessed = preprocessor.transform(X_test)
+
+# Get feature names after one-hot encoding
+cat_features_out = preprocessor.named_transformers_['cat'].get_feature_names_out(categorical_features)
+all_feature_names = numerical_features + list(cat_features_out)
+
+print(f"Original X_train shape: {X_train.shape}")
+print(f"Preprocessed X_train shape: {X_train_preprocessed.shape}")
+"""))
+
+cells.append(create_code_cell("""# Visualization of Phase 5 (Log1p & Scaling Proof)
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Original highly skewed feature
+sns.histplot(X_train['total_visits'], bins=30, ax=axes[0], color='orange', kde=True)
+axes[0].set_title("Before: 'total_visits' (Highly Right-Skewed)")
+axes[0].set_ylabel("Count")
+
+# Extract the transformed 'total_visits' column
+total_visits_idx = numerical_features.index('total_visits')
+transformed_total_visits = X_train_preprocessed[:, total_visits_idx]
+
+sns.histplot(transformed_total_visits, bins=30, ax=axes[1], color='purple', kde=True)
+axes[1].set_title("After: 'total_visits' (log1p + StandardScaler)")
+axes[1].set_ylabel("Count")
+
+plt.tight_layout()
+plt.savefig('plots/Preprocessing/phase5_scaling.png', bbox_inches='tight')
+plt.show()
+"""))
+
+cells.append(create_markdown_cell("""## Phase 6: Handle Imbalance and Save
+The dataset is imbalanced. We will use `class_weight='balanced'` in our models, and later try SMOTE during cross-validation. 
+Finally, we save the preprocessed datasets and the pipeline for use in modeling."""))
+
+cells.append(create_code_cell("""import joblib
+import pandas as pd
+import os
+
+os.makedirs('dataset_processed', exist_ok=True)
+
+# Convert preprocessed arrays back to DataFrames
+X_train_final = pd.DataFrame(X_train_preprocessed, columns=all_feature_names)
+X_test_final = pd.DataFrame(X_test_preprocessed, columns=all_feature_names)
+
+# Save datasets
+X_train_final.to_csv('dataset_processed/X_train_final.csv', index=False)
+X_test_final.to_csv('dataset_processed/X_test_final.csv', index=False)
+y_train.to_csv('dataset_processed/y_train_final.csv', index=False)
+y_test.to_csv('dataset_processed/y_test_final.csv', index=False)
+
+# Save the sklearn pipeline
+joblib.dump(preprocessor, 'dataset_processed/preprocessing_pipeline.pkl')
+
+print("All preprocessing steps completed and saved successfully!")
 """))
 
 # Construct JSON
