@@ -149,7 +149,8 @@ print(missing_df)
 # Plot
 plt.figure(figsize=(10, 5))
 if not missing_df.empty:
-    sns.barplot(x=missing_df.index, y='Missing_Pct', data=missing_df, palette='viridis')
+    ax = sns.barplot(x=missing_df.index, y='Missing_Pct', data=missing_df, palette='viridis')
+    for c in ax.containers: ax.bar_label(c, fmt='%.1f%%', fontsize=9)
     plt.xticks(rotation=45, ha='right')
     plt.title('Percentage of Missing Values per Feature (Only features with missing data)')
     plt.ylabel('% Missing')
@@ -277,6 +278,7 @@ for i, col in enumerate(categorical_cols):
     # Get top 15 categories if there are too many unique values
     top_cats = df[col].value_counts().nlargest(15).index
     sns.countplot(data=df[df[col].isin(top_cats)], x=col, ax=axes[i], palette='Set2', order=top_cats)
+    for c in axes[i].containers: axes[i].bar_label(c, fmt='%.0f', fontsize=8)
     axes[i].set_title(f'Count: {col} (Top 15)')
     axes[i].tick_params(axis='x', rotation=45)
 
@@ -438,6 +440,227 @@ We have a clear path forward for the Preprocessing phase.
 | High encounters per patient | Random split causes leakage | GroupKFold / Split by `patient_nbr` |
 | Hospice/Death discharge codes | Inflates negative classes | Drop rows with terminal codes |
 | Diagnosis codes have 700+ unique values | High dimensionality | Group ICD-9 codes by category |
+"""))
+
+# --- PREPROCESSING START ---
+cells.append(create_markdown_cell("""# Preprocessing
+
+## Phase 1: Clean Rows and Columns
+Following our Preprocessing Plan, we will drop terminal patients, drop `weight` and identifier columns, and dynamically drop near-zero variance medications."""))
+
+cells.append(create_code_cell("""# 1. Drop Hospice/Expired
+# Save 'Before' distribution
+dist_before = df['readmitted'].value_counts(normalize=True) * 100
+
+terminal_codes = [11, 13, 14, 19, 20, 21]
+df_clean = df[~df['discharge_disposition_id'].isin(terminal_codes)].copy()
+print(f"Original shape: {df.shape} | Shape after dropping terminal patients: {df_clean.shape}")
+
+# Save 'After' distribution and plot
+dist_after = df_clean['readmitted'].value_counts(normalize=True) * 100
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+sns.barplot(x=dist_before.index, y=dist_before.values, ax=axes[0], palette='Reds', order=['NO', '>30', '<30'])
+for c in axes[0].containers: axes[0].bar_label(c, fmt='%.1f%%', fontsize=10)
+axes[0].set_title("Target Dist (Before Terminal Drop)")
+axes[0].set_ylabel("Percentage (%)")
+
+sns.barplot(x=dist_after.index, y=dist_after.values, ax=axes[1], palette='Greens', order=['NO', '>30', '<30'])
+for c in axes[1].containers: axes[1].bar_label(c, fmt='%.1f%%', fontsize=10)
+axes[1].set_title("Target Dist (After Terminal Drop)")
+
+# Make sure plots/Preprocessing folder exists
+import os
+os.makedirs('plots/Preprocessing', exist_ok=True)
+plt.savefig('plots/Preprocessing/phase1_terminal_drop.png', bbox_inches='tight')
+plt.show()
+
+# 2. Drop columns
+cols_to_drop = ['weight', 'examide', 'citoglipton', 'encounter_id']
+df_clean.drop(columns=cols_to_drop, errors='ignore', inplace=True)
+
+# 3. Drop near-zero variance medications (>99% 'No')
+med_cols = ['metformin', 'repaglinide', 'nateglinide', 'chlorpropamide', 'glimepiride', 'acetohexamide', 'glipizide', 'glyburide', 'tolbutamide', 'pioglitazone', 'rosiglitazone', 'acarbose', 'miglitol', 'troglitazone', 'tolazamide', 'insulin', 'glyburide-metformin', 'glipizide-metformin', 'glimepiride-pioglitazone', 'metformin-rosiglitazone', 'metformin-pioglitazone']
+
+dropped_meds = []
+for m in med_cols:
+    if m in df_clean.columns:
+        if (df_clean[m] == 'No').mean() * 100 > 99:
+            dropped_meds.append(m)
+
+df_clean.drop(columns=dropped_meds, errors='ignore', inplace=True)
+print(f"Dropped {len(dropped_meds)} zero-variance medications: {dropped_meds}")
+"""))
+
+cells.append(create_markdown_cell("""## Phase 2: Split the Data
+We use **Option A**: Keep all visits but strictly split by `patient_nbr`. We use the patient's first encounter to stratify the class balance appropriately."""))
+
+cells.append(create_code_cell("""from sklearn.model_selection import train_test_split
+
+# Get the first visit's target for each patient to stratify safely
+first_encounters = df_clean.sort_values('patient_nbr').groupby('patient_nbr').first()
+patient_targets = first_encounters['readmitted']
+
+train_patients, test_patients = train_test_split(
+    patient_targets.index, 
+    test_size=0.20, 
+    stratify=patient_targets.values,
+    random_state=42
+)
+
+train_df = df_clean[df_clean['patient_nbr'].isin(train_patients)].copy()
+test_df = df_clean[df_clean['patient_nbr'].isin(test_patients)].copy()
+
+print(f"Train set: {train_df.shape[0]} encounters ({len(train_patients)} unique patients)")
+print(f"Test set:  {test_df.shape[0]} encounters ({len(test_patients)} unique patients)")
+
+# Plotting the Stratification Success
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+train_dist = train_df['readmitted'].value_counts(normalize=True) * 100
+test_dist = test_df['readmitted'].value_counts(normalize=True) * 100
+
+sns.barplot(x=train_dist.index, y=train_dist.values, ax=axes[0], palette='Blues', order=['NO', '>30', '<30'])
+for c in axes[0].containers: axes[0].bar_label(c, fmt='%.1f%%', fontsize=10)
+axes[0].set_title("Train Set Class Distribution")
+axes[0].set_ylabel("Percentage (%)")
+
+sns.barplot(x=test_dist.index, y=test_dist.values, ax=axes[1], palette='Oranges', order=['NO', '>30', '<30'])
+for c in axes[1].containers: axes[1].bar_label(c, fmt='%.1f%%', fontsize=10)
+axes[1].set_title("Test Set Class Distribution")
+
+plt.savefig('plots/Preprocessing/phase2_split_stratification.png', bbox_inches='tight')
+plt.show()
+"""))
+
+cells.append(create_markdown_cell("""## Phase 3: Missing Value Imputation
+We will address the missing data carefully. Certain "missing" values are highly informative (e.g., lack of a specialist or lack of an A1C test) and must be treated as independent categories rather than imputed with a mode or median."""))
+
+cells.append(create_code_cell("""# Save missing counts before Phase 3
+missing_before = train_df.isnull().sum()
+missing_before = missing_before[missing_before > 0]
+
+# 1. Impute informative missing values
+informative_cols = ['medical_specialty', 'payer_code', 'race']
+for col in informative_cols:
+    train_df[col] = train_df[col].fillna('Unknown')
+    test_df[col] = test_df[col].fillna('Unknown')
+
+# 2. Handle 'None' in lab test results
+test_cols = ['max_glu_serum', 'A1Cresult']
+for col in test_cols:
+    train_df[col] = train_df[col].replace('None', 'Not tested').fillna('Not tested')
+    test_df[col] = test_df[col].replace('None', 'Not tested').fillna('Not tested')
+
+# 3. Drop tiny fraction of remaining NaNs (e.g., missing gender, missing diag_1)
+train_df.dropna(subset=['gender', 'diag_1', 'diag_2', 'diag_3'], inplace=True)
+test_df.dropna(subset=['gender', 'diag_1', 'diag_2', 'diag_3'], inplace=True)
+
+# Plotting the Before & After of Missing Values
+missing_after = train_df.isnull().sum()
+missing_after = missing_after[missing_after > 0]
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+if not missing_before.empty:
+    ax0 = sns.barplot(x=missing_before.index, y=missing_before.values, ax=axes[0], palette='Reds')
+    for c in ax0.containers: ax0.bar_label(c, fmt='%.0f', fontsize=9)
+    axes[0].set_title("Missing Values Count (Before Phase 3)")
+    axes[0].tick_params(axis='x', rotation=45)
+
+if missing_after.empty:
+    axes[1].text(0.5, 0.5, '0 Missing Values Remaining!\\nDataset is Clean.', ha='center', va='center', fontsize=16, color='green', fontweight='bold')
+    axes[1].set_title("Missing Values Count (After Phase 3)")
+    axes[1].axis('off')
+
+plt.tight_layout()
+import os
+os.makedirs('plots/Preprocessing', exist_ok=True)
+plt.savefig('plots/Preprocessing/phase3_missing_imputation.png', bbox_inches='tight')
+plt.show()
+
+print(f"Train set after Phase 3: {train_df.shape}")
+print(f"Test set after Phase 3:  {test_df.shape}")
+
+print("\\nMissing values remaining in Train:\\n", train_df.isnull().sum()[train_df.isnull().sum() > 0])
+"""))
+
+cells.append(create_markdown_cell("""## Phase 4: Feature Engineering
+We will group high-cardinality features (like diagnosis codes), convert ordinal variables to numbers, and engineer new aggregate features like `total_visits` and `meds_per_day`."""))
+
+cells.append(create_code_cell("""import re
+
+def map_diagnosis(code):
+    if code == '?' or pd.isna(code): return 'Other'
+    if str(code).startswith('V') or str(code).startswith('E'): return 'Other'
+    try:
+        c = float(code)
+        if c == 250: return 'Diabetes'
+        if 390 <= c <= 459 or c == 785: return 'Circulatory'
+        if 460 <= c <= 519 or c == 786: return 'Respiratory'
+        if 520 <= c <= 579 or c == 787: return 'Digestive'
+        if 800 <= c <= 999: return 'Injury'
+        if 710 <= c <= 739: return 'Musculoskeletal'
+        if 580 <= c <= 629 or c == 788: return 'Genitourinary'
+        if 140 <= c <= 239: return 'Neoplasms'
+        return 'Other'
+    except:
+        return 'Other'
+
+for col in ['diag_1', 'diag_2', 'diag_3']:
+    train_df[col] = train_df[col].apply(map_diagnosis)
+    test_df[col] = test_df[col].apply(map_diagnosis)
+
+# Age mapping
+age_map = {'[0-10)':0, '[10-20)':1, '[20-30)':2, '[30-40)':3, '[40-50)':4, '[50-60)':5, '[60-70)':6, '[70-80)':7, '[80-90)':8, '[90-100)':9}
+train_df['age'] = train_df['age'].map(age_map)
+test_df['age'] = test_df['age'].map(age_map)
+
+# Medical Specialty and Payer Code (Top 10)
+# Remember: Apply the Top 10 from TRAIN to TEST to prevent leakage!
+top_specialties = train_df['medical_specialty'].value_counts().nlargest(10).index
+train_df['medical_specialty'] = train_df['medical_specialty'].apply(lambda x: x if x in top_specialties else 'Other')
+test_df['medical_specialty'] = test_df['medical_specialty'].apply(lambda x: x if x in top_specialties else 'Other')
+
+top_payers = train_df['payer_code'].value_counts().nlargest(10).index
+train_df['payer_code'] = train_df['payer_code'].apply(lambda x: x if x in top_payers else 'Other')
+test_df['payer_code'] = test_df['payer_code'].apply(lambda x: x if x in top_payers else 'Other')
+
+# Binning skewed counts
+def bin_counts(x):
+    if x == 0: return '0'
+    elif x == 1: return '1'
+    elif x == 2: return '2'
+    else: return '3+'
+
+for col in ['number_outpatient', 'number_emergency', 'number_inpatient']:
+    train_df[col + '_binned'] = train_df[col].apply(bin_counts)
+    test_df[col + '_binned'] = test_df[col].apply(bin_counts)
+
+# New Engineered Features
+train_df['total_visits'] = train_df['number_outpatient'] + train_df['number_emergency'] + train_df['number_inpatient']
+test_df['total_visits'] = test_df['number_outpatient'] + test_df['number_emergency'] + test_df['number_inpatient']
+
+train_df['meds_per_day'] = train_df['num_medications'] / np.maximum(1, train_df['time_in_hospital'])
+test_df['meds_per_day'] = test_df['num_medications'] / np.maximum(1, test_df['time_in_hospital'])
+
+print("Phase 4 Feature Engineering complete!")
+print("Train set shape:", train_df.shape)
+"""))
+
+cells.append(create_code_cell("""# Visualization of Phase 4 (Feature Engineering Proof)
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+sns.countplot(data=train_df, x='diag_1', ax=axes[0], palette='magma')
+for c in axes[0].containers: axes[0].bar_label(c, fmt='%.0f', fontsize=9)
+axes[0].set_title("Grouped Diagnoses (diag_1) - Reduced from 700+ to 9")
+axes[0].tick_params(axis='x', rotation=45)
+
+sns.countplot(data=train_df, x='number_inpatient_binned', ax=axes[1], palette='crest', order=['0', '1', '2', '3+'])
+for c in axes[1].containers: axes[1].bar_label(c, fmt='%.0f', fontsize=9)
+axes[1].set_title("Binned Inpatient Visits - Handled Extreme Skew")
+
+plt.tight_layout()
+plt.savefig('plots/Preprocessing/phase4_features.png', bbox_inches='tight')
+plt.show()
 """))
 
 # Construct JSON

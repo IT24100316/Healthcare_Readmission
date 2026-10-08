@@ -54,6 +54,14 @@
 ---
 
 ## 6. Preprocessing & Feature Engineering Log
-| Area | Decision Made | Reason | Evidence |
-| :--- | :--- | :--- | :--- |
-| *(TBD)* | *(TBD)* | *(TBD)* | *(TBD)* |
+| Decision | Options Considered | Chosen | Reason (Why we chose/rejected) | Evidence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Phase 1: Terminal Patients** | 1) Keep all rows. <br>2) Drop terminal discharge codes. | Drop terminal codes | *Rejected 1:* Artificially inflates the negative class because deceased patients cannot physically return. <br>*Chose 2:* Ensures the model only learns from viable candidates. | `discharge_disposition` mapping counts from EDA. |
+| **Phase 1: Useless Columns** | 1) Impute `weight` / Keep all meds. <br>2) Drop `weight` & zero-variance meds. | Drop `weight` & zero-variance meds | *Rejected 1:* Imputing a 97% missing column creates pure bias/noise. Keeping 99% "No" meds causes sparsity issues. <br>*Chose 2:* Reduces noise and dimensionality safely. | Missing % bar chart; Univariate medication counts. |
+| **Phase 2: Data Leakage & Splitting** | 1) Standard random split. <br>2) Split by `patient_nbr` (Option A: keep all visits). <br>3) Keep only 1st visit per patient (Option B). | Option A (Keep all visits, split by patient) | *Rejected 1:* Fatal data leakage (patient memorization). <br>*Rejected 3:* Loses ~30k valuable clinical encounters. <br>*Chose 2:* Preserves maximum data volume while strictly isolating patients to prevent leakage. | Patient encounters histogram (shows max 40 visits per patient). |
+| **Phase 3: Informative Missing Values** | 1) Mode imputation. <br>2) Impute as `"Unknown"`. | Impute as `"Unknown"` | *Rejected 1:* Falsely assumes missingness is random; forces patients into dominant categories. <br>*Chose 2:* Lack of a specialist or payer code is inherently a valid signal/category. | High missing % (49% and 39%) from EDA. |
+| **Phase 3: Missing Test Results** | 1) Drop rows. <br>2) Impute as `"Not tested"`. | Impute as `"Not tested"` | *Rejected 1:* Drops >80% of data. <br>*Chose 2:* The absence of an A1C test strongly signals something about the hospital visit context. | Test categorical distributions showing 'None'. |
+| **Phase 3: Minor Flaws** | 1) Mode Impute `diag` and `gender`. <br>2) Drop rows. | Drop rows | *Rejected 1:* A model shouldn't guess a primary diagnosis or gender. <br>*Chose 2:* Safely removes <0.1% of flawed records without losing signal. | EDA Missing % table. |
+| **Phase 4: ICD-9 Diagnosis** | 1) OHE all 700+ codes. <br>2) Group into 9 medical categories. | Group into 9 categories | *Rejected 1:* Creates massive sparsity (curse of dimensionality) leading to overfitting. <br>*Chose 2:* Follows standard medical practice to group by broad system (Circulatory, Respiratory, etc.). | ICD-9 grouping guidelines. |
+| **Phase 4: Count Variables** | 1) Leave continuous. <br>2) Bin into 0, 1, 2, 3+. | Bin into categories | *Rejected 1:* Extreme right-skew causes model instability. <br>*Chose 2:* Captures the non-linear jump between 'never admitted' and 'frequent flyer' without outlier skew. | `number_inpatient` histogram. |
+| **Phase 4: Rare Categories** | 1) Keep all 70+ specialties. <br>2) Top 10 + "Other". | Top 10 + "Other" | *Rejected 1:* Rare doctors with 1 patient will heavily overfit the tree models. <br>*Chose 2:* Retains 90% of the signal while heavily reducing dimensionality. | `medical_specialty` value counts. |
