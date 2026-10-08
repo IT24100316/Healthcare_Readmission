@@ -1,0 +1,22 @@
+# Environments
+venv/
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Datasets & Large Files
+dataset/
+dataset.zip
+dataset_extracted/
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
