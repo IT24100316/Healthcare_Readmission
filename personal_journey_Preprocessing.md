@@ -1,24 +1,23 @@
-# Personal Journey: Preprocessing the Diabetic Readmission Dataset
-**Name:** Abeyrathna P.H.T.S
-**IT Number:** IT24100007
-**Role:** Preprocessing & Feature Engineering
+# Personal Journey: Preprocessing & Feature Engineering
+**Name:** Fernando S.A.W
+**IT Number:** IT24101304
+**Role:** Data Preprocessing & Feature Engineering
 
-## The Initial Overwhelm & Early Failures
-Facing over 100,000 records and 50 features, my textbook instinct was to aggressively clean the data—drop missing values and randomly split 80/20. This led to my first major mistake. I initially used a standard random split and achieved overly optimistic baseline results, only to realize I had introduced fatal data leakage because some patients visited the hospital up to 40 times. Grouping the split strictly by `patient_nbr` was a hard-learned lesson in the difference between theoretical machine learning and real-world clinical data. 
+## Inheriting the Data & Finding Leakage
+Taking over the dataset after the EDA phase, my immediate task was to transform the raw, messy clinical data into a clean, machine-learning-ready matrix. But right away, I spotted a massive logical flaw in how we were going to split the data.
 
-## Clinical Context Over Blind Statistics
-Relying on my teammate’s EDA findings, I learned not to apply statistical formulas blindly without understanding the domain. I focused on three core clinical representations:
-* **Missing Data as Signal:** Instead of mathematically imputing `medical_specialty` or `payer_code`, I recognized that the *absence* of a specialist is a workflow reality. Imputing these as `"Unknown"` treated the missingness as a valid clinical signal.
-* **Taming Rare Categories:** Retaining 70+ rare doctors would cause tree models to severely overfit. I kept only the Top 10 most frequent categories (which covered over 85% of all patient records), grouping the rest into `"Other"`.
-* **Conceptual Grouping:** Purely statistical grouping of Administrative IDs (e.g., Discharge Disposition) destroyed their meaning. Manually mapping them into conceptual flows like `"Home"` or `"Facility"` preserved their real-world impact.
+While analyzing the dataset shape, I noticed that although there were ~101,000 encounters, there were only about 71,500 unique patients (`patient_nbr`). Some patients had visited up to 40 times! I quickly realized that if I performed a standard random train/test split, a single patient's records would bleed into both the training and testing sets. The model would just memorize the patient rather than learn generalizable patterns. I took it upon myself to completely rewrite the splitting logic to group strictly by `patient_nbr`, ensuring zero patient memorization leakage.
 
-## Feature Engineering
-Keeping 22 highly sparse columns for specific diabetes medications introduced excessive noise. Instead, I engineered two features: `num_active_drugs` and `num_drug_changes`. This captured the concepts of "polypharmacy" and "health instability" while drastically reducing dimensionality. I applied similar logic to create a `lab_tests_per_day` ratio to capture the intensity of a hospital stay.
+## Counter-Intuitive Outlier Handling
+One of my biggest self-learning moments came when dealing with outliers. When I looked at the numerical features, variables like `number_inpatient` (prior visits) had extreme right-tail outliers. My first instinct, based on standard tutorials, was to just drop them using the IQR method. 
 
-## Embracing an Experimental Mindset
-The most significant evolution in my approach came from a lecturer's feedback. I had initially binned outlier values (like a patient with 20 prior visits) into a safe `"3+"` category to protect linear models. The lecturer pointed out that tree-based algorithms are immune to skew and thrive on raw counts. 
+But stepping back and thinking about the hospital's actual business problem, I realized something critical: patients with 20+ prior visits are the exact "high-utilizer" patients that are most at risk of readmission! Dropping them would delete the most important signal in the dataset. Instead, I researched and applied a `log1p` transformation, which safely compressed these extreme values to stabilize our linear models without losing the high-risk patients.
 
-Rather than assuming one method was better, I adopted an experimental design. I updated the pipeline to preserve raw numeric counts and created a granular 17-category diagnosis mapping to test alongside my baseline 9-category mapping. 
+## Conquering High Dimensionality
+The dataset suffered from massive dimensionality and sparsity. The 700+ diagnosis codes and 23 individual medication columns were too noisy to be useful directly. 
+I engineered a robust solution:
+1. I grouped the ICD-9 codes into 9 broad clinical categories based on medical definitions.
+2. For the medications, I noticed that 20 of them had near-zero variance (>99% "No"). I dropped the useless ones and created powerful new aggregate features: `num_drug_changes` and `total_visits`. This captured the true intensity of the patient's condition (polypharmacy) rather than forcing the model to memorize rare drug names.
 
 ## Conclusion
-Wrapping the final transformations securely inside a scikit-learn `ColumnTransformer` ensured no leakage occurred during encoding and scaling. Moving forward into the modeling phase, this experimental foundation allows me to objectively let cross-validation prove whether raw counts and granular diagnoses truly improve predictive performance over the safer baselines.
+My biggest takeaway from this journey is that preprocessing is not just a checklist of code functions—it is an exercise in rigorous domain logic. From dropping deceased patients to strictly fitting my `ColumnTransformer` only on the training data to prevent future leakage, I learned that a machine learning model's predictive power relies entirely on the structural integrity of the preprocessing pipeline I built.
