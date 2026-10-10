@@ -369,6 +369,20 @@ cells.append(create_markdown_cell("""### Categorical Features vs Target"""))
 cells.append(create_code_cell("""import scipy.stats as stats
 from IPython.display import display
 
+def plot_readmission_distribution(col, ax):
+    if col not in df.columns or df[col].nunique() == 0:
+        return None
+    ct = pd.crosstab(df[col], df['target'], normalize='index') * 100
+    if '<30' in ct.columns:
+        ct = ct.sort_values(by='<30', ascending=False)
+    cols = [c for c in ['NO', '>30', '<30'] if c in ct.columns]
+    ct[cols].plot(kind='bar', stacked=True, ax=ax, colormap='viridis')
+    ax.set_title(f'Readmission by {col}')
+    ax.set_ylabel('% of Patients')
+    ax.tick_params(axis='x', rotation=45)
+    ax.legend(title='Target')
+    return ct
+
 # 1. Compute Chi-Square and Cramer's V for all categorical features
 chi2_results = []
 for col in categorical_cols:
@@ -1066,13 +1080,13 @@ cells.append(create_markdown_cell("""**What we refined:** Rare medical specialti
 # ── Preprocessing Step 10: Encoding, Scaling (Training Data Only) ─────────────
 cells.append(create_markdown_cell("""## Preprocessing Step 10 · Fit & Apply Encoding, Scaling Using Training Data Only
 We assemble a Scikit-learn `ColumnTransformer` that:
-- Applies `log1p` + `StandardScaler` to all numerical features
+- Applies `log1p` + `RobustScaler` to all numerical features
 - Applies `OneHotEncoder` (trained on train set) to all categorical features
 
 **Critical:** `fit_transform` is called only on training data. `transform` (no fitting) is called on test data."""))
 
 cells.append(create_code_cell("""from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
+from sklearn.preprocessing import OneHotEncoder, RobustScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder
 import numpy as np
@@ -1082,38 +1096,58 @@ target_mapping = {'NO': 0, '>30': 1, '<30': 2}
 y_train = train_df['readmitted'].map(target_mapping)
 y_test  = test_df['readmitted'].map(target_mapping)
 
-X_train = train_df.drop(columns=['readmitted'])
-X_test  = test_df.drop(columns=['readmitted'])
+# Drop temporary bin columns created during EDA to prevent data leakage & redundancy
+bin_cols_to_drop = [c for c in train_df.columns if c.endswith('_bin')]
+X_train = train_df.drop(columns=['readmitted'] + bin_cols_to_drop)
+X_test  = test_df.drop(columns=['readmitted'] + bin_cols_to_drop)
 
 # Precisely route each column to the correct transformer
 categorical_features = X_train.select_dtypes(include=['object', 'category']).columns.tolist()
 numerical_features   = X_train.select_dtypes(exclude=['object', 'category']).columns.tolist()
 
+ordinal_cats_dict = {
+    'gender': ['Female', 'Male'],
+    'change': ['unchanged', 'changed'],
+    'diabetesMed': ['no', 'yes'],
+    'max_glu_serum': ['Not tested', 'Norm', '>200', '>300'],
+    'A1Cresult': ['Not tested', 'Norm', '>7', '>8'],
+    'insulin': ['No', 'Down', 'Steady', 'Up']
+}
+ordinal_features = [c for c in ordinal_cats_dict.keys() if c in categorical_features]
+ordinal_cats = [ordinal_cats_dict[c] for c in ordinal_features]
+nominal_features = [c for c in categorical_features if c not in ordinal_features]
+
 print(f"Numerical features ({len(numerical_features)}): {numerical_features}")
-print(f"Categorical features ({len(categorical_features)}): {categorical_features}")
+print(f"Ordinal features ({len(ordinal_features)}): {ordinal_features}")
+print(f"Nominal (OHE) features ({len(nominal_features)}): {nominal_features}")
 
 # Build transformers
+from sklearn.preprocessing import OrdinalEncoder
 log_transformer      = FunctionTransformer(np.log1p, validate=True)
-numeric_transformer  = Pipeline([('log', log_transformer), ('scaler', StandardScaler())])
-categorical_transformer = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+numeric_transformer  = Pipeline([('log', log_transformer), ('scaler', RobustScaler())])
+ordinal_transformer  = OrdinalEncoder(categories=ordinal_cats, handle_unknown='use_encoded_value', unknown_value=-1)
+nominal_transformer  = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
 
 preprocessor = ColumnTransformer(transformers=[
     ('num', numeric_transformer,   numerical_features),
-    ('cat', categorical_transformer, categorical_features)
+    ('ord', ordinal_transformer,   ordinal_features),
+    ('nom', nominal_transformer,   nominal_features)
 ])
 
 # FIT on train only — transform both
 X_train_preprocessed = preprocessor.fit_transform(X_train)
 X_test_preprocessed  = preprocessor.transform(X_test)
 
-cat_features_out  = preprocessor.named_transformers_['cat'].get_feature_names_out(categorical_features)
-all_feature_names = numerical_features + list(cat_features_out)
+nom_features_out  = preprocessor.named_transformers_['nom'].get_feature_names_out(nominal_features)
+all_feature_names = numerical_features + ordinal_features + list(nom_features_out)
 
 print(f"\\nX_train shape before: {X_train.shape} → after: {X_train_preprocessed.shape}")
 print(f"X_test  shape before: {X_test.shape} → after: {X_test_preprocessed.shape}")
 """))
 
-cells.append(create_markdown_cell("""**What the pipeline does:** Numerical features → `log1p(x)` (skew correction) → `StandardScaler` (zero mean, unit variance). Categorical features → `OneHotEncoder` (fit on train only, `handle_unknown='ignore'` for unseen categories in test). All transformations are strictly trained on the training set only."""))
+cells.append(create_markdown_cell("""**What the pipeline does:** Numerical features → `log1p(x)` (skew correction) → `RobustScaler` (robust to outliers). Ordinal features → `OrdinalEncoder`. Nominal features → `OneHotEncoder` (fit on train only, `handle_unknown='ignore'` for unseen categories in test). All transformations are strictly trained on the training set only."""))
+
+
 
 # ── FE Step 7: Feature Validation ──────────────────────────────────────────────
 cells.append(create_markdown_cell("""## Feature Engineering Step 7 · Feature Validation
@@ -1158,6 +1192,11 @@ print(f"    {'✓ PASS — Values in expected range' if numeric_range < 20 else 
 print("\\n" + "=" * 60)
 print("VALIDATION COMPLETE")
 print("=" * 60)
+
+print(f"\\nConfirmation: X_train_final shape is {X_train_final.shape}")
+print("All columns:")
+print(X_train_final.columns.tolist())
+display(X_train_final.head())
 """))
 
 cells.append(create_markdown_cell("""**Validation confirmed:**

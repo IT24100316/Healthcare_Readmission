@@ -1,0 +1,120 @@
+{
+    "ordinal_encoding": {
+        "gender": {
+            "Female": 0,
+            "Male": 1
+        },
+        "change": {
+            "unchanged": 0,
+            "changed": 1
+        },
+        "diabetesMed": {
+            "no": 0,
+            "yes": 1
+        },
+        "max_glu_serum": {
+            "Not tested": 0,
+            "Norm": 1,
+            ">200": 2,
+            ">300": 3
+        },
+        "A1Cresult": {
+            "Not tested": 0,
+            "Norm": 1,
+            ">7": 2,
+            ">8": 3
+        },
+        "insulin": {
+            "No": 0,
+            "Down": 1,
+            "Steady": 2,
+            "Up": 3
+        }
+    },
+    "one_hot_encoding": {
+        "race": [
+            "AfricanAmerican",
+            "Asian",
+            "Caucasian",
+            "Hispanic",
+            "Other",
+            "Unknown"
+        ],
+        "admission_type_id": [
+            "Elective",
+            "Emergency",
+            "Other"
+        ],
+        "discharge_disposition_id": [
+            "Facility",
+            "Home",
+            "Home_Health",
+            "Other"
+        ],
+        "admission_source_id": [
+            "Emergency_Room",
+            "Other",
+            "Referral",
+            "Transfer"
+        ],
+        "payer_code": [
+            "BC",
+            "CM",
+            "CP",
+            "HM",
+            "MC",
+            "MD",
+            "OG",
+            "Other",
+            "SP",
+            "UN",
+            "Unknown"
+        ],
+        "medical_specialty": [
+            "Cardiology",
+            "Emergency/Trauma",
+            "Family/GeneralPractice",
+            "InternalMedicine",
+            "Nephrology",
+            "Orthopedics",
+            "Orthopedics-Reconstructive",
+            "Other",
+            "Radiologist",
+            "Surgery-General",
+            "Unknown"
+        ],
+        "diag_1": [
+            "Circulatory",
+            "Diabetes",
+            "Digestive",
+            "Genitourinary",
+            "Injury",
+            "Musculoskeletal",
+            "Neoplasms",
+            "Other",
+            "Respiratory"
+        ],
+        "diag_2": [
+            "Circulatory",
+            "Diabetes",
+            "Digestive",
+            "Genitourinary",
+            "Injury",
+            "Musculoskeletal",
+            "Neoplasms",
+            "Other",
+            "Respiratory"
+        ],
+        "diag_3": [
+            "Circulatory",
+            "Diabetes",
+            "Digestive",
+            "Genitourinary",
+            "Injury",
+            "Musculoskeletal",
+            "Neoplasms",
+            "Other",
+            "Respiratory"
+        ]
+    }
+}
