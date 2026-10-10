@@ -30,30 +30,29 @@
 
 ---
 
-## 4. EDA Insight Log
-| Chart | What you learned | What you did about it |
-| :--- | :--- | :--- |
-| Target Distribution Bar Chart | Class imbalance with 3 categories (<30 is ~11%). | Will use class weights or SMOTE and prioritize metrics for the minority class. |
-| Encounters per Patient Histogram | Many patients visit multiple times (up to 40 times). | Confirmed necessity of splitting train/test by patient ID to prevent leakage. |
-| Missing % Bar Chart | `weight` is 97% missing; `medical_specialty` ~49%. | Will drop `weight`. Will impute `medical_specialty` with "Unknown". |
-| Readmission by `discharge_disposition` | Certain codes (hospice/expired) mean readmission is impossible. | Will drop rows with terminal discharge codes to prevent target leakage. |
-| Correlation Heatmap | No severe multicollinearity amongst numeric features. | Will retain all numeric features for tree-based models. |
-| Outlier Boxplots | Many numerical features (e.g., number_inpatient) have severe right-tail outliers. | Used the IQR method to count them dynamically. Will consider Winsorization or robust algorithms. |
+## 4. Exploratory Data Analysis (EDA)
+
+### 4.1. EDA Insight Log
+| Analysis Area | Observation / Insight | Evidence (Real Data) | Action Taken for Modeling |
+| :--- | :--- | :--- | :--- |
+| **Target Variable** | The 3 classes are highly imbalanced: NO (~54%), >30 (~35%), <30 (~11%). | Target distribution plot showing `<30` as severe minority. | Will use class weights or SMOTE during modeling and prioritize metrics (Recall/F1) for the `<30` class. |
+| **Distributions (Numerical)** | Count variables (e.g., `number_inpatient`, `number_emergency`) are heavily right-skewed. | Univariate numerical histograms and boxplots. | Will apply `log1p` transformation to heavily skewed features to stabilize linear models. |
+| **Distributions (Categorical)** | Dozens of medications (e.g., `chlorpropamide`) have >99% "No" values. `diag` features have 700+ unique ICD-9 codes. | Univariate categorical frequency plots. | Drop near-zero variance medications to reduce noise. Group ICD-9 codes into broader clinical categories. |
+| **Feature Relationships** | Highest correlations: `num_medications` & `time_in_hospital` (0.47). No severe multicollinearity (>0.8). | Pearson correlation heatmap. | Retain all numerical features as they provide distinct signals without risking severe multicollinearity. |
+| **Target Relationships** | `A1Cresult` and medication risk profiles do not strictly increase monotonically. `number_inpatient` strongly correlates with `<30` risk. | Targeted Feature vs Readmission proportion plots. | Use One-Hot Encoding instead of Ordinal Encoding to prevent forcing false mathematical assumptions on models. |
+
+### 4.2. EDA: Data Issues Log
+| Data Issue | Observation / Evidence | Impact on the Task | Action Taken |
+| :--- | :--- | :--- | :--- |
+| Excessive missing data in `weight` | `weight` is missing in ~97% of records. | Adds noise and provides almost no signal; imputing would create pure bias. | Drop the `weight` column completely before modeling. |
+| Masked Missing Values (Placeholders) | Missing values are coded as `'?'`, `'Unknown/Invalid'`, or `'None'`. | Pandas cannot automatically detect these as missing data, causing parsing errors and preventing standard imputation. | Replace all textual placeholders with proper `np.nan` values during initial load. |
+| Hidden Nulls in Admin Codes | `IDS_mapping.csv` reveals integer IDs map to "NULL" or "Not Mapped". | These look like valid categories to the model but actually represent missing data. | Parse mapping definitions and convert conceptually missing IDs to `np.nan` or "Unknown". |
+| Logical Impossibility (Terminal Codes) | Thousands of patients were discharged to Hospice or Expired (e.g., ID 11, 13, 14). | These patients physically cannot be readmitted, which artificially inflates the negative ('NO') class accuracy. | Drop all rows containing terminal discharge disposition codes to prevent target leakage. |
+| Patient Memorization Leakage | No exact duplicate rows, but up to 40 encounters exist for the same patient ID (~71k patients, ~101k rows). | A standard random train/test split would place the same patient in both sets, causing severe data leakage (model memorizes the patient). | Split the data strictly grouping by `patient_nbr` to prevent patient memorization leakage. |
 
 ---
 
-## 5. Data Issues Log
-| Issue | Impact on the task | Action taken |
-| :--- | :--- | :--- |
-| Excessive missing data in `weight` | Adds noise, provides no signal if 97% missing. | Drop `weight` column completely. |
-| Placeholders like '?' used instead of NaN | Pandas cannot automatically detect missing data. | Replace '?', 'Unknown/Invalid', etc., with `np.nan`. |
-| Terminal discharge codes (Death/Hospice) | Patients conceptually cannot be readmitted, artificially inflates negative class. | Remove all rows with these discharge codes. |
-| Same patient appears in many rows | Random train/test split will cause data leakage. | Group split by `patient_nbr` / remove subsequent visits. |
-| Coded IDs stored as integers | Masked hidden nulls (e.g., "NULL", "Not Mapped") from pandas missing value checkers. | Dynamically parsed `IDS_mapping.csv` to map IDs and properly flag hidden nulls as NaNs. |
-
----
-
-## 6. Preprocessing & Feature Engineering Log
+## 5. Preprocessing & Feature Engineering Log
 | Decision | Options Considered | Chosen | Reason (Why we chose/rejected) | Evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | **Phase 1: Terminal Patients** | 1) Keep all rows. <br>2) Drop terminal discharge codes. | Drop terminal codes | *Rejected 1:* Artificially inflates the negative class because deceased patients cannot physically return. <br>*Chose 2:* Ensures the model only learns from viable candidates. | `discharge_disposition` mapping counts from EDA. |
