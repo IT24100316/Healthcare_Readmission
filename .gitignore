@@ -24,3 +24,4 @@ Thumbs.db
 
 # Large Model Binaries (>100MB exceeds GitHub limits)
 models/random_forest/*.pkl
+binary_classification/models/random_forest/*.pkl

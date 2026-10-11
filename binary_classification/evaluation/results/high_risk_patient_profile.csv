@@ -1,0 +1,5 @@
+,time_in_hospital,time_in_hospital,num_lab_procedures,num_lab_procedures,num_medications,num_medications,number_inpatient,number_inpatient,number_emergency,number_emergency,total_visits,total_visits,number_diagnoses,number_diagnoses,num_active_drugs,num_active_drugs,age,age,prob_less30,prob_less30
+,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median
+cohort,,,,,,,,,,,,,,,,,,,,
+Predicted High-Risk (<30),0.132,0.0,-0.175,0.039,0.182,0.21,1.284,1.585,0.194,0.0,0.951,1.0,-0.032,0.295,0.036,0.0,0.083,0.464,0.574,0.558
+Predicted Low-Risk (No / >30),-0.12,-0.263,-0.452,-0.04,-0.138,-0.115,0.281,0.0,0.081,0.0,0.355,0.0,-0.296,0.0,-0.034,0.0,-0.079,0.0,0.325,0.325

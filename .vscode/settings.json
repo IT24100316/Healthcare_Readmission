@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/Scripts/python.exe",
+    "jupyter.interactiveWindow.textEditor.executeSelection": true,
+    "pyrefly.enable": false,
+    "pyrefly.lint.enable": false,
+    "python.linting.enabled": false
+}

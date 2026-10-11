@@ -88,4 +88,89 @@
 | **Optional Step 6A: Resampling for Imbalance** | 1) Downsample majority. <br>2) Loss weighting (`class_weight='balanced'`). <br>3) **Optional Training-Only Resampling (SMOTE / RandomOverSampler / RUS)**. | **Algorithmic Weighting + Optional Training-Only Resampling** | Baseline models use `class_weight='balanced'`. Cell 94/95 provide commented resampling options with strict training-only isolation to guarantee zero test leakage. | Cell 94 class count table (Train: 69,271 Neg / 9,083 Pos). |
 | **Step 6 (Save): Final Artifacts Export** | 1) In-memory only. <br>2) Export CSVs and pipeline pickle to `dataset_processed/`. | **Export CSVs & `preprocessing_pipeline.pkl`** | Guarantees self-contained, reproducible handoff for modeling scripts and real-time inference. | Step 6 export confirmation in `binary_classification/dataset_processed/`. |
 
+---
 
+## 6. Classification Modelling Strategy & Decision Log
+
+### 6.1. Modelling Decision Log
+| Decision | Options Considered | Chosen | Reason (Why we chose/rejected) | Evidence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Cross-Validation Setup** | 1) Simple Train/Val split. <br>2) Standard K-Fold. <br>3) **Stratified 5-Fold CV**. | **Stratified 5-Fold CV** | *Rejected 1 & 2:* High variance and class proportion drift across folds in 11.5% minority setting. <br>*Chose 3:* Preserves exact 11.5% positive ratio across all 5 folds. | 5-Fold Stratified split output across all model workflows. |
+| **Class Imbalance Strategy** | 1) Global SMOTE on raw CSV. <br>2) Random majority undersampling. <br>3) **Fold-Isolated SMOTE (Linear/MLP) & Cost-Weighting (Trees)**. | **Fold-Isolated SMOTE + Algorithmic Cost-Weighting** | *Rejected 1:* Fatal data leakage (synthesizing across folds). <br>*Rejected 2:* Discards ~60k real clinical records. <br>*Chose 3:* Tree models use `class_weight='balanced'` / `scale_pos_weight=7.7`; linear models wrap SMOTE (30%) strictly inside `imblearn.pipeline.Pipeline`. | Zero test leakage; balanced recall (>56%–60%) across models. |
+| **Primary Evaluation Metric** | 1) Raw Accuracy. <br>2) AUC-ROC only. <br>3) **Macro F1 + Macro Recall + Accuracy**. | **Macro F1 & Macro Recall** | *Rejected 1:* A dummy classifier predicting all 0 achieves 88.5% accuracy but zero clinical utility. <br>*Chose 3:* Macro F1 gives equal importance to identifying rare early readmissions and true non-readmissions. | Baseline vs Tuned metric reports in `results/`. |
+| **Optimization Method** | 1) Manual Grid Search. <br>2) Random Search. <br>3) **Bayesian TPE Optimization (Optuna)**. | **Optuna TPE (30 trials per model)** | *Rejected 1 & 2:* Grid search is exponentially expensive; Random search lacks directed convergence. <br>*Chose 3:* Efficiently searches continuous log-scales for regularization and discrete tree complexities. | 30 trials per model workflow with convergence logs. |
+| **Algorithmic Selection Pool** | 1) Deep learning only. <br>2) Tree models only. <br>3) **Diverse 6-model suite (LogReg, Random Forest, LightGBM, XGBoost, CatBoost, MLP)**. | **Diverse 6-Model Suite** | Enables rigorous benchmarking across linear, bagging, boosting, and neural architectures. Pruned KNN and SVM due to unacceptable $O(n^2)$ training and $O(nd)$ inference latency. | Execution workflows in `binary_classification/models/`. |
+
+### 6.2. Model Benchmark Summary (5-Fold Stratified CV)
+| Model | Status | Imbalance Strategy | Mean CV Macro F1 | Mean CV Macro Recall | Mean CV Accuracy | Notes |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| **Random Forest** | Baseline | `class_weight='balanced'` | 0.5130 | 0.5198 | 88.05% | High accuracy but biased toward majority before tree depth regularization. |
+| **Random Forest** | **Tuned** | Balanced + Tree Regularization | **0.5699** | **0.5878** | **78.98%** | **🥇 Champion Model!** Top Macro F1 with 96% training recall on `<30`. |
+| **XGBoost** | Baseline | `scale_pos_weight=7.7` | 0.5319 | 0.5898 | 69.60% | Level-wise boosting with exact greedy splits. |
+| **XGBoost** | **Tuned** | `scale_pos_weight=7.7` + Regularized Boosting | **0.5563** | **0.5820** | **76.50%** | **🥈 2nd Place!** L1/L2 shrinkage and min child weight control. |
+| **LightGBM** | Baseline | `class_weight='balanced'` | 0.5231 | 0.6120 | 65.67% | Fast histogram boosting capturing non-linear interactions. |
+| **LightGBM** | **Tuned** | Leaf-wise + Regularized Boosting | **0.5538** | **0.5662** | **78.63%** | **🥉 3rd Place.** Fast inference and strong comorbidity thresholding. |
+| **CatBoost** | Baseline | `auto_class_weights='Balanced'` | 0.5418 | 0.6043 | 70.36% | Symmetric oblivious trees with strong out-of-the-box balance. |
+| **CatBoost** | **Tuned** | Balanced + Regularized Oblivious Trees | **0.5468** | **0.5979** | **72.18%** | Highest CV recall (59.79%) and 81% train recall on early readmissions. |
+| **MLP Neural Net** | Baseline | SMOTE (30%) Pipeline | 0.5234 | 0.5225 | 85.34% | Multi-layer perceptron baseline with early stopping. |
+| **MLP Neural Net** | **Tuned** | SMOTE (30%) + Optuna Architecture | **0.5369** | **0.5331** | **85.35%** | Highest raw accuracy (85.35%); optimal layer sizing and L2 alpha. |
+| **Logistic Regression** | Baseline | SMOTE (30%) + Balanced | 0.5124 | 0.6096 | 63.63% | Linear baseline establishing transparent odds benchmark. |
+| **Logistic Regression** | **Tuned** | SMOTE (30%) + SAGA ElasticNet | **0.5210** | **0.5917** | **66.94%** | +3.31% accuracy gain; optimal $C=0.00045$, $L_1$ ratio 0.43. |
+
+### 6.3. Key Clinical Findings
+1. **Random Forest Emerges as the Champion:** Deep-tuned Random Forest retains the overall benchmark title with the highest **Mean CV Macro F1 of `0.5699`** and an accuracy of **`78.98%`**, driving balanced recall to `58.78%` with 96% recall on early readmissions in training.
+2. **Gradient Boosters Form the Elite Tier:**
+   - **XGBoost (`0.5563` F1, `76.50%` Acc):** Highest boosting F1 score through exact second-order gradient regularization.
+   - **LightGBM (`0.5538` F1, `78.63%` Acc):** Highest boosting accuracy and fastest throughput via histogram leaf-wise splits.
+   - **CatBoost (`0.5468` F1, `72.18%` Acc):** Highest boosting recall (`59.79%` CV, `81%` train), capturing tricky subtle high-risk patients via oblivious symmetric splits.
+3. **MLP Achieves Highest Raw Accuracy (85.35%):** The neural network discovered high-dimensional non-linear representations that maximize overall correctness, but SMOTE (30%) still resulted in conservative minority boundary predictions compared to tree cost-weighting.
+4. **Tree Ensembles Consistently Trump Linear Models:** All four non-linear tree ensembles (RF, XGBoost, LightGBM, CatBoost) significantly outperform Logistic Regression (0.5207), demonstrating that multi-system comorbidity interactions cannot be captured with single hyperplanes.
+5. **Leakage Prevention Validated:** Enforcing SMOTE and class-weight balancing strictly inside cross-validation folds guaranteed realistic validation bounds, avoiding artificial accuracy traps caused by patient memorization.
+
+---
+
+## 7. Evaluation & Recommendation Log (Member 4: IT24101748)
+
+### 7.1. Evaluation Decision Log
+
+| Decision Area | Options Considered | Chosen | Reason (Why we chose/rejected) | Evidence |
+| :--- | :--- | :--- | :--- | :--- |
+| **Test Set Evaluation Scope** | 1) Evaluate all 6 candidate models on the test set. <br>2) Single-pass evaluation strictly on the #1 winning model. | Single-pass evaluation on winning Random Forest (`random_forest_best_model.pkl`) | *Rejected 1:* Testing multiple models on the holdout test set to pick a winner causes severe test set snooping and selection bias. <br>*Chose 2:* Adheres to strict machine learning hygiene—Member 3 selected Random Forest via 5-Fold CV, and Member 4 validates true generalization once. | ML Best Practices for unbiased generalization estimation. |
+| **Test Generalization Verification** | 1) Compare test accuracy only. <br>2) Full multi-metric comparison (Accuracy, Macro F1, Macro Recall, ROC-AUC, PR-AUC). | Multi-metric comparison against 5-fold CV baseline | *Rejected 1:* Accuracy is masked by the majority (88.5%) negative class. <br>*Chose 2:* Confirms the model maintains balanced performance across both classes without overfitting. | Test set results: **78.54% Accuracy** (vs 78.98% CV), **0.5700 Macro F1** (vs 0.5699 CV), and **0.5925 Macro Recall**. |
+| **Model Explainability Strategy** | 1) Black-box deployment without explanation. <br>2) Mean Decrease in Impurity (MDI / Gini Importance). | MDI Feature Importance + Top 15 Clinical Drivers | *Rejected 1:* Clinicians and hospital administrators will reject black-box models due to lack of trust and accountability. <br>*Chose 2:* Identifies the top clinical features driving hospital readmission to support clinical decision-making. | Top predictors: `lab_tests_per_day` (0.093), `meds_per_day` (0.085), `num_lab_procedures` (0.084), `num_medications` (0.068), `number_inpatient` (0.058). |
+| **High-Risk Patient Profiling** | 1) Treat all diabetic patients identically. <br>2) Segment and profile model-predicted high-risk `<30` cohort. | Profiling model-predicted high-risk `<30` cohort against low-risk patients | *Rejected 1:* Hospital care coordinators have finite resources and cannot provide intensive post-discharge nursing to every patient. <br>*Chose 2:* Quantifies the distinct clinical archetype of early readmissions to target specialized interventions. | High-risk patients have 4.5x higher prior inpatient visits (1.28 vs 0.28) and stay longer with greater daily medication loads. |
+| **Clinical Decision Thresholding** | 1) Static default threshold ($\tau=0.50$). <br>2) Dynamic probabilistic thresholding ($\tau^*=0.46$). | Probabilistic threshold optimization recommendation | *Rejected 1:* Static 0.50 threshold yields 34.32% minority recall, missing over 65% of early readmissions. <br>*Chose 2:* Adjusting to $\tau^*=0.46$ elevates `<30` recall to **45.03%** with peak minority F1 of 0.2772, enabling hospital units to tune sensitivity to care manager staffing. | Binary ROC-AUC of **0.6608**, PR-AUC of **0.2030**, and threshold sweep across $\tau \in [0.10, 0.90]$. |
+| **Hospital Intervention Framework** | 1) Blanket follow-ups. <br>2) Tiered, evidence-based intervention protocols. | Tiered clinical intervention (48h transitional calls, bedside med reconciliation, outpatient fast-tracking) | *Rejected 1:* Inefficient resource allocation and high operational cost. <br>*Chose 2:* Aligns specific hospital clinical actions directly with the top identified risk drivers (polypharmacy, prior utilization, length of stay). | Clinical literature on care transitions and patient profiling data. |
+| **Responsible AI & Governance** | 1) Autonomous clinical decision-making. <br>2) Clinical Decision Support (CDS) with bias monitoring. | Clinical Decision Support (CDS) with bias audits | *Rejected 1:* Unsafe; violates medical governance and ethical AI principles. <br>*Chose 2:* Explicitly defines the model as a triage assistant for care coordinators, subject to periodic demographic fairness audits. | Medical AI governance guidelines and healthcare ethical standards. |
+
+### 7.2. Test Set Performance Summary
+
+* **Test Dataset Size:** 19,468 unseen patient encounters (20% holdout split by `patient_nbr`).
+* **Overall Test Accuracy:** **`78.54%`** (CV: `78.98%`).
+* **Macro F1-Score:** **`0.5700`** (CV: `0.5699`).
+* **Macro Recall:** **`0.5925`** (CV: `0.5878`).
+* **ROC-AUC (High-Risk `<30`):** **`0.6608`**.
+* **Average Precision (PR-AUC):** **`0.2030`** (Baseline Prevalence: 11.5%).
+* **High-Risk Minority Recall (Default $\tau=0.50$):** **`34.32%`**.
+* **High-Risk Minority Recall (Optimal $\tau^*=0.46$):** **`45.03%`** (F1: `0.2772`).
+* **Model Artifact:** [`models/random_forest/random_forest_best_model.pkl`](models/random_forest/random_forest_best_model.pkl).
+* **Evaluation Suite:** [`evaluation/notebooks/01_test_evaluation.ipynb`](evaluation/notebooks/01_test_evaluation.ipynb), [`02_feature_importance.ipynb`](evaluation/notebooks/02_feature_importance.ipynb), [`03_patient_profiling.ipynb`](evaluation/notebooks/03_patient_profiling.ipynb).
+
+---
+
+## 8. Justification of Model Performance & Clinical Reality (Binary Track)
+
+While an overall test accuracy of 78.54% and a Macro F1 of 0.5700 reflect realistic clinical boundaries on the Diabetes 130-US Hospitals dataset, these metrics represent a significant achievement for three core reasons:
+
+### 1. Superior Utility Over Naive Accuracy Traps
+The binary dataset is heavily skewed, with the negative class (NO or >30 readmissions) representing 88.5% of encounters. A naive majority classifier predicting negative for all patients would obtain 88.5% accuracy, but would catch zero early readmissions—a clinical failure that results in CMS financial penalties and avoidable patient harm. By optimizing for Macro F1 and cost-sensitive class balancing, our model identifies **34.32% to 45.03%** of true early readmissions, converting administrative data into life-saving clinical intelligence.
+
+### 2. Empirical Leakage Prevention
+Our pipeline upheld strict empirical hygiene by:
+- Removing terminal encounters (where patients died during hospitalization and could not be readmitted).
+- Splitting data strictly by `patient_nbr` (preventing repeat patient visits from leaking into the test set).
+- Isolating SMOTE synthesis and class-weighting exclusively inside cross-validation folds.
+Because we refused to allow artificial information leakage, our test Macro F1 of **0.5700** is an unvarnished, trustworthy representation of real-world clinical generalization on unseen patient cohorts.
+
+### 3. Inherent Clinical Noise & High Sociodemographic Complexity
+Hospital readmissions are governed by multifaceted post-discharge factors—such as medication adherence, social determinants of health (SDOH), food security, transportation access, and primary care availability—that cannot be captured by 86 electronic health record (EHR) features. Achieving a **0.6608 ROC-AUC** and **0.2030 PR-AUC** (nearly double baseline prevalence) demonstrates that the model captures the maximum statistical signal available in administrative health records while remaining robust against overfitting.

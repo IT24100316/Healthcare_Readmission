@@ -1,0 +1,7 @@
+Rank,Model Key,Model Name,Model Family,CV Macro F1,CV Macro Recall,CV Accuracy (%),Minority (<30) Recall,Minority (<30) F1
+1,random_forest,Random Forest (Deep Tuned),Bagged Trees,0.5699,0.5878,78.98,0.96,0.73
+2,xgboost,XGBoost (Deep Tuned),Gradient Boosting,0.5563,0.582,76.5,0.91,0.62
+3,lightgbm,LightGBM (Deep Tuned),Gradient Boosting,0.5538,0.5662,78.63,0.96,0.69
+4,catboost,CatBoost (Deep Tuned),Gradient Boosting,0.5468,0.5979,72.18,0.81,0.47
+5,mlp,MLP + SMOTE (Deep Tuned),Neural Network,0.5369,0.5331,85.35,0.19,0.26
+6,logistic_regression,Logistic Regression (Deep Tuned),Linear Model,0.521,0.5917,66.94,0.5,0.25
