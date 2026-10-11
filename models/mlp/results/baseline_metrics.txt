@@ -1,0 +1,14 @@
+Mean CV Macro F1: 0.4165
+Mean CV Macro Recall: 0.4195
+Mean CV Accuracy: 0.5026
+
+Classification Report on Full Train Data (Baseline):
+              precision    recall  f1-score   support
+
+           0       0.68      0.66      0.67     41193
+           1       0.51      0.54      0.52     28211
+           2       0.42      0.42      0.42      8950
+
+    accuracy                           0.59     78354
+   macro avg       0.54      0.54      0.54     78354
+weighted avg       0.59      0.59      0.59     78354

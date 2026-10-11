@@ -1,0 +1,11 @@
+{
+    "test_samples": 19468,
+    "overall_accuracy": 0.5407848777480995,
+    "macro_f1": 0.45868277600076207,
+    "macro_recall": 0.4614607925861464,
+    "macro_precision": 0.4571383560006382,
+    "roc_auc_macro_ovr": 0.6668035937447652,
+    "minority_less30_recall": 0.27071333628710675,
+    "minority_less30_precision": 0.23117669315172154,
+    "minority_less30_f1": 0.2493877551020408
+}
