@@ -10,6 +10,7 @@ dataset/
 dataset.zip
 dataset_extracted/
 *.csv
+!**/results/*.csv
 
 # Python
 __pycache__/
@@ -20,3 +21,7 @@ __pycache__/
 # OS Generated Files
 .DS_Store
 Thumbs.db
+
+# Large Model Binaries (>100MB exceeds GitHub limits)
+models/random_forest/*.pkl
+binary_classification/models/random_forest/*.pkl
