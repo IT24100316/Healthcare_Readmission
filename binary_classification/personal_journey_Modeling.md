@@ -23,7 +23,7 @@ The baseline Logistic Regression pipeline produced the following metrics recorde
 * **Mean CV Macro Recall:** 0.6085
 * **Mean CV Accuracy:** 63.55%
 
-While the baseline model successfully detected early readmissions, the performance ceiling suggested that a linear decision boundary could not sufficiently capture multi-variable interactions in chronic diabetic care.
+The baseline results suggested that Logistic Regression may not capture all the complex relationships in the dataset, motivating me to evaluate nonlinear models and ensemble methods.
 
 ---
 
@@ -32,7 +32,7 @@ With 78,331 training rows and 86 features, evaluating models across 5 folds mean
 
 I applied specific filtering criteria based on computational complexity and dataset characteristics:
 * **Exclusion of KNN and Kernel SVM:** A standard RBF-kernel SVM exhibits computational complexity between O(n^2) and O(n^3). On over 60,000 training instances per fold, computing kernel matrices causes severe computational bottlenecks, while KNN (O(nd)) introduces high latency during prediction.
-* **Exclusion of Naive Bayes & Single Decision Trees:** Naive Bayes strictly assumes conditional feature independence—an assumption violated by clinical electronic health records where laboratory test counts, medication regimens, and secondary diagnoses are correlated. Single decision trees exhibited high variance, making them prone to overfitting on sparse clinical categories.
+* **Exclusion of Naive Bayes & Single Decision Trees:** Standard Naive Bayes assumes conditional feature independence—an assumption violated by clinical electronic health records where laboratory test counts, medication regimens, and secondary diagnoses are correlated. Single decision trees exhibited high variance, making them prone to overfitting on sparse clinical categories.
 * **Selection of Six Core Candidate Architectures:** I selected six distinct architectures spanning four foundational learning paradigms:
   1. *Linear Models:* **Logistic Regression** (L1, L2, and ElasticNet regularization via the SAGA solver).
   2. *Bagging Ensembles:* **Random Forest** (decorrelated bootstrap aggregating).
@@ -47,10 +47,10 @@ I applied specific filtering criteria based on computational complexity and data
 The 11.49% minority prevalence was addressed using paradigm-specific techniques:
 * **Tree Ensembles (Random Forest, LightGBM, CatBoost):** Handled via algorithmic cost-sensitive weighting (`class_weight='balanced'` and `auto_class_weights='Balanced'`), penalizing minority false negatives directly within split objective calculations.
 * **XGBoost Native Cost Weighting:** Binary classification enabled the application of XGBoost's native `scale_pos_weight = 7.70` (calculated as 69,327 / 9,004), weighting gradient steps inversely proportional to class frequencies.
-* **Linear & Neural Models (Logistic Regression, MLP) via Resampling Pipelines:** Because standard neural networks and linear models lack native gradient-level cost weighting in this configuration, SMOTE (`sampling_strategy=0.30`) was integrated inside an `imblearn.pipeline.Pipeline`. This ensured that synthetic minority sample generation was isolated strictly to training folds and never applied to validation folds.
+* **Linear and Neural Models (Logistic Regression and MLP):** SMOTE with `sampling_strategy=0.30` was used within an `imblearn.pipeline.Pipeline` to address class imbalance in the selected model configurations. Logistic Regression also supports class weighting, but SMOTE was used in the reported pipeline to increase minority-class representation during training. Applying SMOTE inside the pipeline ensured that synthetic samples were generated only from the training portion of each cross-validation fold, leaving validation data unchanged.
 
 ### 3.2. Methodological Limitation in Cross-Validation
-*Important Methodological Note:* The initial train/test partition (78,331 training vs 19,491 test encounters) was strictly grouped by `patient_nbr` to ensure no individual patient appeared in both training and test sets. However, within the training dataset, `patient_nbr` was dropped prior to model training. Consequently, internal cross-validation across all six models utilized standard **Stratified 5-Fold Cross-Validation** (`StratifiedKFold`) rather than `GroupKFold`. Multiple encounters from the same patient within the training partition may therefore appear across different training and validation folds. This constitutes a recognized methodological limitation of the reported cross-validation metrics, though the holdout test set remains strictly isolated at the patient level.
+*Important Methodological Note:* The initial train/test partition (78,331 training vs 19,491 test encounters) was strictly grouped by `patient_nbr` to ensure no individual patient appeared in both training and test sets. However, within the training dataset, `patient_nbr` was dropped prior to model training. Consequently, internal cross-validation across all six models utilized standard **Stratified 5-Fold Cross-Validation** (`StratifiedKFold`) rather than `GroupKFold`. This limitation may affect the reliability of the internal cross-validation estimates because encounters from the same patient may appear in different folds. However, the holdout test set remains separated at the patient level, provided it is not used for model selection, hyperparameter tuning, or threshold selection before the final evaluation. Consequently, the final test results can provide an independent assessment of generalization to unseen patients.
 
 ---
 
@@ -75,7 +75,7 @@ To evaluate model capacity, hyperparameter optimization was executed using Optun
 
 5. **Multi-Layer Perceptron (Architecture & Regularization):**  
    Tuned using hidden layer structures ((100,), (64, 32), (128, 64), (50, 25)), activation functions (`relu`, `tanh`), L2 weight decay (`alpha` between 1e-5 and 1e-1), learning rates, and early stopping (`n_iter_no_change=10`).  
-   * **Recorded Results:** Achieved **85.35% CV Accuracy** and **0.5369 CV Macro F1**, with a CV Macro Recall of **0.5331** (Full training fit minority recall: 19.0%). While 85.35% was the highest raw accuracy among the models, it remains below the 88.51% majority-class-only benchmark, and reflects conservative minority-class identification rather than superior discrimination.
+   * **Recorded Results:** Although the MLP achieved the highest reported CV accuracy of 85.35%, its Macro F1 of 0.5369 and Macro Recall of 0.5331 were lower than those of several tree-based models. Since the dataset is imbalanced, accuracy alone is insufficient for selecting the best model. The full-training-set minority recall of 19.0% is an in-sample result and should not be interpreted as its cross-validation minority recall. Therefore, the MLP was not selected as the leading candidate under the chosen balanced-performance criteria.
 
 6. **Logistic Regression (SAGA ElasticNet Optimization):**  
    Tuned the L1/L2 mixing parameter (`l1_ratio` between 0.1 and 0.9) and inverse regularization parameter C on a log scale within the fold-isolated SMOTE pipeline.  
@@ -101,11 +101,15 @@ The table below presents the verified 5-fold cross-validation metrics alongside 
 
 ---
 
-## 6. Conclusion & Handoff to Evaluation Phase
-This comparative analysis highlights several key technical observations:
-1. **Ensemble Performance on Tabular Clinical Data:** Tree ensembles demonstrated higher balanced Macro F1 scores compared to the linear baseline and neural network. Random Forest achieved the highest recorded **CV Macro F1 (0.5699)** and balanced **CV Macro Recall (0.5878)** at **78.98% accuracy**, making it the leading candidate model for further evaluation.
-2. **Evaluation Metric Considerations:** While the Multi-Layer Perceptron obtained the highest nominal accuracy (**85.35%**), its low minority recall (19.0% on full training fit) demonstrates that high accuracy in an imbalanced setting can reflect majority-class bias rather than balanced predictive capability.
+## 6. Personal Learning and Reflection
+Throughout this classification modelling phase, I learned that selecting an effective model involves far more than comparing raw accuracy scores. I had to carefully balance class imbalance, computational cost, architectural complexity, and the risk of overfitting. Systematically comparing linear models, bagged tree ensembles, gradient boosting algorithms, and neural networks gave me practical insight into how distinct learning paradigms behave on skewed clinical tabular data. I also recognized the critical importance of validation hygiene—particularly how standard stratified cross-validation can be limited when multiple encounters belong to the same patient. These findings guided me to select Random Forest as the leading candidate architecture based on balanced cross-validation metrics, while appropriately reserving final out-of-sample generalization and clinical decision threshold trade-offs for the independent evaluation phase.
 
+---
+
+## 7. Conclusion & Handoff to Evaluation Phase
+This comparative analysis highlights several key technical observations:
+1. **Ensemble Performance and Model Selection:** Tree ensembles demonstrated higher balanced Macro F1 scores compared to the linear baseline and neural network. Random Forest was selected as the leading candidate architecture because it achieved the highest recorded **CV Macro F1 (0.5699)** under our primary balanced evaluation criterion, supported by a competitive **CV Macro Recall (0.5878)** and **78.98% CV accuracy** (although CatBoost achieved a slightly higher CV Macro Recall of 0.5979).
+2. **Evaluation Metric Considerations:** Although the Multi-Layer Perceptron obtained the highest nominal CV accuracy (**85.35%**), accuracy on an imbalanced dataset does not alone establish model efficacy; its CV Macro F1 of 0.5369 and CV Macro Recall of 0.5331 were lower than those of the tree-based ensembles. The reported 19.0% minority recall represents in-sample performance on the full training set rather than an out-of-fold cross-validation metric, and Random Forest was ultimately selected because it achieved the highest verified CV Macro F1 under our primary balanced evaluation criteria.
 
 **Handoff to Phase 2 (Evaluation):**  
-The Random Forest architecture was selected as the candidate model for single-pass evaluation on the untouched holdout test set (19,491 encounters). This subsequent phase evaluates true generalization on unseen patient data, examines decision threshold calibration to assess clinical trade-offs between precision and recall, and performs feature importance extraction for clinical decision support.
+The Random Forest architecture was selected as the candidate model for single-pass evaluation on the holdout test set (19,491 encounters), which remained separated from the modelling phase. This subsequent phase will evaluate generalization to unseen patients, examine decision-threshold trade-offs between precision and recall, and perform feature-importance analysis to support clinical decision-making.
